@@ -1,0 +1,79 @@
+name: بلا
+
+on:
+  workflow_dispatch:
+    inputs:
+      SOURCE_LINKS:
+        description: 'روابط البث - فرق بينهم بـ ,'
+        required: true
+
+      FB_STREAM_KEYS:
+        description: 'مفاتيح البث - فرق بينهم بـ ,'
+        required: true
+
+jobs:
+  multi-broadcast:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: ⚡ Install FFmpeg & Certificates
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg ca-certificates
+          sudo update-ca-certificates
+
+      - name: 🚀 Start Multi Streaming
+        shell: bash
+        run: |
+          echo "=============================="
+          echo "🚀 STARTING OPTIMIZED STREAM..."
+          echo "=============================="
+          IFS=',' read -ra SOURCES <<< "${{ github.event.inputs.SOURCE_LINKS }}"
+          IFS=',' read -ra KEYS <<< "${{ github.event.inputs.FB_STREAM_KEYS }}"
+          COUNT_SOURCES=${#SOURCES[@]}
+          COUNT_KEYS=${#KEYS[@]}
+          
+          if [ "$COUNT_SOURCES" -ne "$COUNT_KEYS" ]; then
+            echo "❌ عدد الروابط وعدد المفاتيح غير متساوي"
+            exit 1
+          fi
+
+          # إذا كان بث واحد، يتم تشغيله مباشرة في الواجهة لمراقبة الأخطاء
+          if [ "$COUNT_SOURCES" -eq 1 ]; then
+            SOURCE=$(echo "${SOURCES}" | xargs)
+            KEY=$(echo "${KEYS}" | xargs)
+            echo "▶️ Launching Single Stream..."
+            ffmpeg \
+            -reconnect 1 \
+            -reconnect_streamed 1 \
+            -reconnect_delay_max 10 \
+            -headers "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36\r\n" \
+            -i "$SOURCE" \
+            -c:v libx264 -preset ultrafast -pix_fmt yuv420p -g 60 -b:v 1500k -maxrate 1500k -bufsize 3000k \
+            -c:a aac -b:a 128k -ar 44100 \
+            -f flv "rtmps://://facebook.com"
+          else
+            # إذا كانت بثوث متعددة، يتم تشغيلها في الخلفية مع تخفيف الإعدادات لضمان الاستقرار
+            for (( i=0; i<$COUNT_SOURCES; i++ ))
+            do
+              SOURCE=$(echo "${SOURCES[$i]}" | xargs)
+              KEY=$(echo "${KEYS[$i]}" | xargs)
+              echo "▶️ Launch Stream $((i+1)) ف الخلفية..."
+              ffmpeg \
+              -reconnect 1 \
+              -reconnect_streamed 1 \
+              -reconnect_delay_max 10 \
+              -headers "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36\r\n" \
+              -i "$SOURCE" \
+              -c:v libx264 -preset ultrafast -pix_fmt yuv420p -g 60 -b:v 1500k -maxrate 1500k -bufsize 3000k \
+              -c:a aac -b:a 128k -ar 44100 \
+              -f flv "rtmps://://facebook.com" > stream_$i.log 2>&1 &
+            done
+            
+            echo "🔥 ALL STREAMS RUNNING - MONITORING LOGS..."
+            sleep 10
+            tail -n 20 stream_0.log
+            
+            while true; do sleep 60; done
+          fi
+
